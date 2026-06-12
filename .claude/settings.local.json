@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 8 python main.py)",
+      "Bash(timeout 6 python main.py)",
+      "Bash(agent-browser --cdp 9222 eval \"Array.from\\(document.querySelectorAll\\('iframe'\\)\\).map\\(f=>\\({id:f.id,src:f.src?.substring\\(0,120\\)}\\)\\)\")",
+      "Bash(agent-browser --cdp 9222 frame \"#iframe\")",
+      "Bash(agent-browser --cdp 9222 eval \"Array.from\\(document.querySelectorAll\\('iframe'\\)\\).map\\(f=>\\({id:f.id,src:f.src?.substring\\(0,150\\)}\\)\\)\")",
+      "Bash(agent-browser --cdp 9222 eval \"\\(\\(\\)=>{const text=document.body.innerText;const idx=text.indexOf\\('单选题'\\);return {found:idx>=0,preview:idx>=0?text.substring\\(idx-20,idx+300\\):text.substring\\(0,300\\)}}\\)\\(\\)\")",
+      "Read(//c/Users/谭竣/.claude/skills/subagent-driven-development/**)",
+      "Read(//c/Users/谭竣/.agents/skills/subagent-driven-development/**)"
+    ]
+  }
+}

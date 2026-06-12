@@ -1,0 +1,43 @@
+# 学习通自动刷题配置
+
+# --- 浏览器配置 ---
+browser:
+  browser_type: edge        # edge (本地Edge) | chromium (自带Chromium)
+  headless: false           # 是否无头模式（调试时建议 false）
+  cdp_port: null            # 连接已运行的浏览器 (如: 9222)，null 则自动启动
+  slow_mo: 100              # 全局操作延迟(ms)，越大越像人类
+  viewport:
+    width: 1280
+    height: 800
+
+# --- AI 配置 ---
+ai:
+  provider: openai          # openai | anthropic（DeepSeek用openai）
+  model: deepseek-chat      # DeepSeek 模型
+  api_key: "${OPENAI_API_KEY}"  # 从环境变量读取
+  api_base: "https://api.deepseek.com"  # DeepSeek API 地址
+  max_retries: 3            # 格式错误重试次数
+  temperature: 0.1          # 越低越确定
+
+# --- 拟人化配置 ---
+humanize:
+  min_delay: 3              # 每题最小间隔(秒)
+  max_delay: 12             # 每题最大间隔(秒)
+  typing_speed: [80, 200]   # 打字速度范围(ms/字)
+  mouse_noise: true         # 鼠标轨迹加噪
+
+# --- OCR 配置 ---
+ocr:
+  engine: paddleocr         # paddleocr | tesseract
+  language: ch              # 识别语言
+  confidence_threshold: 0.7  # 置信度阈值
+
+# --- 学习通 URL ---
+urls:
+  login: "https://passport2.chaoxing.com/login"
+  courses: "https://mooc1.chaoxing.com/visit/courselist"
+
+# --- 日志 ---
+logging:
+  level: INFO               # DEBUG | INFO | WARNING
+  file: "data/app.log"

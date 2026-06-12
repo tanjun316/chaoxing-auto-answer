@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>学习通助手 — 设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <h1>⚙️ 学习通助手 设置</h1>
+
+    <section>
+      <h2>AI 配置</h2>
+
+      <div class="form-group">
+        <label for="provider">AI 提供商</label>
+        <select id="provider">
+          <option value="openai">OpenAI / DeepSeek (兼容)</option>
+          <option value="anthropic">Anthropic Claude</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="apiKey">API Key</label>
+        <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off">
+        <span class="hint">仅在本地传输，不上传任何服务器</span>
+      </div>
+
+      <div class="form-group">
+        <label for="apiBase">API Base URL</label>
+        <input type="text" id="apiBase" placeholder="https://api.deepseek.com">
+        <span class="hint">DeepSeek 用户填 https://api.deepseek.com</span>
+      </div>
+
+      <div class="form-group">
+        <label for="model">模型</label>
+        <input type="text" id="model" placeholder="deepseek-chat">
+        <span class="hint">如: gpt-4o-mini, deepseek-chat, claude-sonnet-4-6</span>
+      </div>
+    </section>
+
+    <section>
+      <h2>行为设置</h2>
+
+      <div class="form-group">
+        <label class="toggle">
+          <input type="checkbox" id="autoMode" checked>
+          <span>自动检测题目并开始答题</span>
+        </label>
+        <span class="hint">关闭后需手动点击扩展图标开始</span>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="saveBtn" class="btn-primary">保存设置</button>
+      <span id="status" class="status"></span>
+    </div>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

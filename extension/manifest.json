@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "学习通助手",
+  "version": "1.0",
+  "description": "自动答题工具 — 支持单选、多选、判断、填空、简答",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "*://*.chaoxing.com/*",
+    "*://*.edu.cn/*",
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "world": "MAIN",
+      "matches": ["*://*.chaoxing.com/*", "*://*.edu.cn/*"],
+      "js": ["content/detect.js"],
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
+      "world": "ISOLATED",
+      "matches": ["*://*.chaoxing.com/*", "*://*.edu.cn/*"],
+      "js": [
+        "shared/protocol.js",
+        "shared/extractor.js",
+        "shared/filler.js",
+        "shared/humanize.js",
+        "content/content.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "学习通助手"
+  },
+  "options_page": "options/options.html"
+}
