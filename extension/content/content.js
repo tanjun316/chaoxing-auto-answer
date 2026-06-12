@@ -3,20 +3,17 @@
 // ─── 初始化 ───
 
 (async function main() {
-  const role = classifyFrame();
+  let role = classifyFrame();
+
+  // 非 primary frame: 监听 DOM 变化，等题目异步加载后再重新分类
+  if (role !== 'primary') {
+    role = await waitForQuestions();
+  }
+
   if (role === 'inactive') return;
 
   // 向 Background 报告
-  chrome.runtime.sendMessage({
-    type: MSG.FRAME_CLASSIFY,
-    role: role,
-    questionCount: role === 'primary' ? countQuestions() : 0
-  }, (response) => {
-    if (response) {
-      window.__cxTabId = response.tabId;
-      window.__cxFrameId = response.frameId;
-    }
-  });
+  reportFrame(role);
 
   // 监听 Background 指令
   chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
@@ -48,6 +45,48 @@
     }
   );
 })();
+
+// ─── 等待题目异步加载 ───
+
+function waitForQuestions(timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    // 先立即检查一次
+    if (classifyFrame() === 'primary') {
+      resolve('primary');
+      return;
+    }
+
+    // MutationObserver 监听 DOM 变化
+    const observer = new MutationObserver(() => {
+      if (classifyFrame() === 'primary') {
+        observer.disconnect();
+        resolve('primary');
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // 超时：保持原始分类
+    setTimeout(() => {
+      observer.disconnect();
+      resolve(classifyFrame());
+    }, timeoutMs);
+  });
+}
+
+// ─── 上报 frame 分类（可多次调用以更新状态） ───
+
+function reportFrame(role) {
+  chrome.runtime.sendMessage({
+    type: MSG.FRAME_CLASSIFY,
+    role: role,
+    questionCount: role === 'primary' ? countQuestions() : 0
+  }, (response) => {
+    if (response) {
+      window.__cxTabId = response.tabId;
+      window.__cxFrameId = response.frameId;
+    }
+  });
+}
 
 // ─── 任务状态 ───
 

@@ -80,6 +80,15 @@ async function handlePopupMessage(msg, port) {
           type: 'start',
           autoMode: state.autoMode,
         }, { frameId: state.questionFrameId });
+      } else {
+        port.postMessage({
+          type: 'tab_update',
+          tabId: msg.tabId,
+          state: {
+            taskActive: false,
+            error: state ? '页面题目尚未加载，请等待并刷新后重试' : '未找到该标签页'
+          }
+        });
       }
       break;
     }
