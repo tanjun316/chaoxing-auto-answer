@@ -17,52 +17,120 @@ window.alert = function(msg) {
   document.body.setAttribute('data-cx-alert', String(msg || ''));
 };
 
-// ─── 2. 反反调试 —— 静默干掉 debugger 循环 ───
+// ─── 2. 反反调试 —— 多层拦截 debugger ───
 
-const ANTI_DEBUG_PATTERNS = /debugger\s*;?/;
+(function() {
+  const DBG = /debugger\s*;?/;
 
-// Hook setInterval — 过滤包含 debugger 的回调
-const _setInterval = window.setInterval;
-window.setInterval = function(fn, delay) {
-  if (typeof fn === 'string' && ANTI_DEBUG_PATTERNS.test(fn)) return 0;
-  if (typeof fn === 'function' && ANTI_DEBUG_PATTERNS.test(fn.toString())) return 0;
-  return _setInterval.apply(this, arguments);
-};
+  // 检测函数是否含 debugger (处理 bound function / Proxy 等)
+  function hasDebugger(fn) {
+    if (typeof fn === 'string') return DBG.test(fn);
+    if (typeof fn !== 'function') return false;
+    try {
+      // 普通函数 → toString 可见
+      if (DBG.test(fn.toString())) return true;
+      // 尝试获取原始函数 (bind / proxy)
+      if (fn.original) return hasDebugger(fn.original);
+      if (fn.__wrapped) return hasDebugger(fn.__wrapped);
+    } catch (_) {}
+    return false;
+  }
 
-// Hook setTimeout — 同上
-const _setTimeout = window.setTimeout;
-window.setTimeout = function(fn, delay) {
-  if (typeof fn === 'string' && ANTI_DEBUG_PATTERNS.test(fn)) return 0;
-  if (typeof fn === 'function' && ANTI_DEBUG_PATTERNS.test(fn.toString())) return 0;
-  return _setTimeout.apply(this, arguments);
-};
+  // 安全替换: 把 debugger 变成空语句
+  function stripDebugger(s) {
+    return typeof s === 'string' ? s.replace(DBG, '') : s;
+  }
 
-// Hook Function 构造器 — 阻止动态创建 debugger 函数
-const _Function = window.Function;
-window.Function = function() {
-  const len = arguments.length;
-  if (len > 0) {
-    const last = arguments[len - 1];
-    if (typeof last === 'string' && ANTI_DEBUG_PATTERNS.test(last)) {
-      arguments[len - 1] = last.replace(ANTI_DEBUG_PATTERNS, '');
+  // ── 2a. 锁死定时器 (setInterval / setTimeout) ──
+  const _si = window.setInterval;
+  const _st = window.setTimeout;
+
+  ['setInterval', 'setTimeout'].forEach(name => {
+    const orig = name === 'setInterval' ? _si : _st;
+    const hooked = function(fn, delay) {
+      if (hasDebugger(fn)) return 0;
+      return orig.apply(this, arguments);
+    };
+    Object.defineProperty(window, name, {
+      value: hooked,
+      writable: false,
+      configurable: false,
+    });
+  });
+
+  // ── 2b. requestAnimationFrame 循环 ──
+  const _raf = window.requestAnimationFrame;
+  Object.defineProperty(window, 'requestAnimationFrame', {
+    value: function(fn) {
+      if (hasDebugger(fn)) return 0;
+      return _raf.apply(this, arguments);
+    },
+    writable: false,
+    configurable: false,
+  });
+
+  // ── 2c. Function 构造器 ──
+  const _Fn = window.Function;
+  const FnHooked = function() {
+    const len = arguments.length;
+    if (len > 0) {
+      const last = arguments[len - 1];
+      if (typeof last === 'string') arguments[len - 1] = stripDebugger(last);
     }
-  }
-  return _Function.apply(this, arguments);
-};
-window.Function.prototype = _Function.prototype;
+    return _Fn.apply(this, arguments);
+  };
+  FnHooked.prototype = _Fn.prototype;
+  Object.defineProperty(window, 'Function', {
+    value: FnHooked,
+    writable: false,
+    configurable: false,
+  });
 
-// Hook eval — 过滤 debugger 字符串
-const _eval = window.eval;
-window.eval = function(code) {
-  if (typeof code === 'string' && ANTI_DEBUG_PATTERNS.test(code)) {
-    code = code.replace(ANTI_DEBUG_PATTERNS, '');
-  }
-  return _eval.call(this, code);
-};
+  // ── 2d. eval ──
+  const _eval = window.eval;
+  Object.defineProperty(window, 'eval', {
+    value: function(code) {
+      return _eval.call(this, stripDebugger(code));
+    },
+    writable: false,
+    configurable: false,
+  });
 
-// 阻止 console.clear（反调试常用）
-const _consoleClear = console.clear;
-console.clear = function() {};
+  // ── 2e. Function.prototype.constructor (备用路径) ──
+  try {
+    Object.defineProperty(Function.prototype, 'constructor', {
+      value: FnHooked,
+      writable: false,
+      configurable: false,
+    });
+  } catch (_) {}
+
+  // ── 2f. 动态插入的 <script> 标签 —— MutationObserver 剥离 debugger ──
+  const _createElement = document.createElement.bind(document);
+  HTMLScriptElement.prototype._origSetText = Object.getOwnPropertyDescriptor(
+    HTMLScriptElement.prototype, 'textContent'
+  ) || Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'text');
+
+  const origTextSetter = HTMLScriptElement.prototype._origSetText
+    ? HTMLScriptElement.prototype._origSetText.set : null;
+
+  if (origTextSetter) {
+    Object.defineProperty(HTMLScriptElement.prototype, 'textContent', {
+      get: HTMLScriptElement.prototype._origSetText.get,
+      set: function(v) {
+        origTextSetter.call(this, stripDebugger(v));
+      },
+      configurable: true,
+    });
+  }
+
+  // ── 2g. console.clear ──
+  Object.defineProperty(console, 'clear', {
+    value: function() {},
+    writable: false,
+    configurable: false,
+  });
+})();
 
 // ─── 3. 内容嗅探 ───
 
