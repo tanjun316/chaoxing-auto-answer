@@ -15,89 +15,151 @@ function classifyFrame() {
   return 'inactive';
 }
 
-// ─── DOM 提取（原逻辑，重命名） ───
+// ─── 题型映射 (OCS) ───
+// 0=单选 1=多选 2=简答 3=判断 4=填空 5=名词解释 6=论述 7=计算 8=其他 9=分录 10=资料 11=连线 14=完形 15=阅读
+
+function mapCXType(val) {
+  const v = parseInt(val);
+  if (v === 0) return 'single';
+  if (v === 1) return 'multi';
+  if (v === 3) return 'judge';
+  if ([2, 4, 5, 6, 7, 8, 9, 10].includes(v)) return 'fill';
+  return 'single';
+}
+
+// ─── 题型检测（从 HTML 结构） ───
+
+function detectTypeFromStructure(container) {
+  const radios = container.querySelectorAll('input[type="radio"]');
+  const checkboxes = container.querySelectorAll('input[type="checkbox"]');
+  const textareas = container.querySelectorAll('textarea');
+  const textInputs = container.querySelectorAll('input[type="text"], input:not([type])');
+
+  if (radios.length === 2) return 'judge';
+  if (radios.length > 2) return 'single';
+  if (checkboxes.length >= 2) return 'multi';
+  if (textareas.length >= 1 || textInputs.length >= 1) return 'fill';
+  return undefined;
+}
+
+// ─── DOM 提取（OCS 选择器 + 原逻辑合并） ───
 
 function extractQuestionsFromDom() {
-  const text = document.body.innerText;
-
-  // 统计题型确认页面有题目
-  const patterns = {
-    single: /【单选题】/g,
-    multi: /【多选题】/g,
-    judge: /【判断题】/g,
-    fill: /【填空题】/g,
-    short: /【简答题】/g,
-  };
-
-  let totalQuestions = 0;
-  for (const pattern of Object.values(patterns)) {
-    totalQuestions += (text.match(pattern) || []).length;
+  // 优先 OCS 选择器 — 作业/考试页面
+  let roots = document.querySelectorAll('.questionLi');
+  if (roots.length === 0) {
+    // 章节测试页面
+    roots = document.querySelectorAll('.TiMu');
   }
-  if (totalQuestions === 0) return [];
+  if (roots.length === 0) {
+    // 回退到原 [role="option"] 方式
+    return extractQuestionsLegacy();
+  }
 
-  // 通过 option 元素提取每题
+  const questions = [];
+
+  for (let i = 0; i < roots.length; i++) {
+    const root = roots[i];
+
+    // 题型检测
+    let type;
+    const typeInput = root.querySelector('input[name^="type"], input[id^="answertype"]');
+    if (typeInput) {
+      type = mapCXType(typeInput.value);
+    } else {
+      type = detectTypeFromStructure(root) || 'single';
+    }
+
+    // 题干提取
+    const titleEls = root.querySelectorAll('h3, .Zy_TItle .clearfix, div:not(.stem_answer), p');
+    let stem = '';
+    for (const el of titleEls) {
+      const t = el.textContent?.trim();
+      if (t && t.length > 2) {
+        stem = t;
+        break;
+      }
+    }
+    if (!stem) {
+      // 尝试从 innerText 中匹配
+      const text = root.innerText.trim();
+      const qMatch = text.match(/^【(.+?)题】\s*(.+)/m);
+      if (qMatch) {
+        stem = qMatch[2];
+        if (!typeInput) {
+          type = qMatch[1].includes('单选') ? 'single'
+            : qMatch[1].includes('多选') ? 'multi'
+            : qMatch[1].includes('判断') ? 'judge'
+            : qMatch[1].includes('填空') ? 'fill'
+            : 'short';
+        }
+      } else {
+        stem = text.split('\n')[0] || text.substring(0, 100);
+      }
+    }
+
+    // 选项提取
+    const optionEls = root.querySelectorAll(
+      '.answerBg .answer_p, .textDIV, .eidtDiv, ul li .after, ul li textarea, ul textarea, ul li label:not(.before)'
+    );
+    let options = [...optionEls].map(el => el.innerText.trim()).filter(Boolean);
+
+    if (options.length < 2) {
+      options = [...root.querySelectorAll('label')].map(l => l.innerText.trim()).filter(Boolean);
+    }
+    if (options.length < 2) {
+      options = [...root.querySelectorAll('li')].map(l => l.innerText.trim()).filter(Boolean);
+    }
+
+    // 图片提取
+    const stemImages = [...root.querySelectorAll('img')].map(img => img.src).filter(Boolean);
+
+    questions.push({
+      index: i + 1,
+      type: type,
+      stem: stem,
+      container: root,
+      options: options,
+      stemImages: stemImages,
+    });
+  }
+
+  return questions;
+}
+
+// 原逻辑作为兜底
+function extractQuestionsLegacy() {
+  const text = document.body.innerText;
+  if (!/【单选题】|【多选题】|【判断题】|【填空题】|【简答题】/.test(text)) return [];
+
   const optionEls = document.querySelectorAll('[role="option"]');
   const questions = [];
   let currentIndex = 0;
 
   for (const el of optionEls) {
     const t = el.innerText.trim();
-
-    // 匹配题号（纯数字）
     const numMatch = t.match(/^(\d+)$/);
-    if (numMatch) {
-      currentIndex = parseInt(numMatch[1]);
-      continue;
-    }
+    if (numMatch) { currentIndex = parseInt(numMatch[1]); continue; }
 
-    // 匹配题目行
     const qMatch = t.match(/^【(.+?)题】\s*(.+)/);
     if (qMatch) {
       const typeLabel = qMatch[1];
       const type = typeLabel.includes('单选') ? 'single'
         : typeLabel.includes('多选') ? 'multi'
         : typeLabel.includes('判断') ? 'judge'
-        : typeLabel.includes('填空') ? 'fill'
-        : 'short';
+        : typeLabel.includes('填空') ? 'fill' : 'short';
 
       questions.push({
         index: currentIndex || questions.length + 1,
         type: type,
         stem: qMatch[2],
         container: el.parentElement,
-        options: extractOptionsNear(el),
-        stemImages: extractImagesNear(el),
+        options: [...el.parentElement.querySelectorAll('label')].map(l => l.innerText.trim()).filter(Boolean),
+        stemImages: [...el.parentElement.querySelectorAll('img')].map(img => img.src).filter(Boolean),
       });
     }
   }
-
   return questions;
-}
-
-function extractOptionsNear(optionEl) {
-  const parent = optionEl.parentElement;
-  if (!parent) return [];
-
-  // 策略1: label 元素
-  const labels = parent.querySelectorAll('label');
-  if (labels.length >= 2) {
-    return [...labels].map(l => l.innerText.trim()).filter(Boolean);
-  }
-
-  // 策略2: li 元素
-  const lis = parent.querySelectorAll('li');
-  if (lis.length >= 2) {
-    return [...lis].map(l => l.innerText.trim()).filter(Boolean);
-  }
-
-  return [];
-}
-
-function extractImagesNear(optionEl) {
-  const parent = optionEl.parentElement;
-  if (!parent) return [];
-  const imgs = parent.querySelectorAll('img');
-  return [...imgs].map(img => img.src).filter(Boolean);
 }
 
 // ─── API JSON 提取 ───
