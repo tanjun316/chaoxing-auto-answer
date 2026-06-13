@@ -50,25 +50,38 @@
 
 function waitForQuestions(timeoutMs = 15000) {
   return new Promise((resolve) => {
-    // 先立即检查一次
-    if (classifyFrame() === 'primary') {
+    // 先立即检查：DOM 或 API 数据
+    if (hasApiData() || classifyFrame() === 'primary') {
       resolve('primary');
       return;
     }
 
-    // MutationObserver 监听 DOM 变化
+    let lastApiTs = readApiDataTimestamp();
+
+    // MutationObserver 监听 DOM 变化 + API 数据到达
     const observer = new MutationObserver(() => {
       if (classifyFrame() === 'primary') {
         observer.disconnect();
         resolve('primary');
+        return;
+      }
+      const newTs = readApiDataTimestamp();
+      if (newTs > 0 && newTs !== lastApiTs) {
+        lastApiTs = newTs;
+        observer.disconnect();
+        resolve('primary');
       }
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
 
-    // 超时：保持原始分类
+    // 超时
     setTimeout(() => {
       observer.disconnect();
-      resolve(classifyFrame());
+      resolve(hasApiData() ? 'primary' : classifyFrame());
     }, timeoutMs);
   });
 }
@@ -106,7 +119,8 @@ async function handleStart(autoMode) {
       const questions = extractQuestions();
       if (questions.length === 0) break;
 
-      reportProgress('extracted', { total: questions.length });
+      const source = hasApiData() ? 'api' : 'dom';
+      reportProgress('extracted', { total: questions.length, source });
 
       // 请求 AI 答案（通过 Background 转发）
       reportProgress('solving');
@@ -223,14 +237,27 @@ async function submitPage() {
 }
 
 function watchPageChange(callback) {
+  let lastApiTs = readApiDataTimestamp();
+
   const observer = new MutationObserver(() => {
-    const questions = extractQuestions();
-    if (questions.length > 0) {
+    // DOM 检测
+    if (extractQuestionsFromDom().length > 0) {
+      observer.disconnect();
+      callback('dom_change');
+      return;
+    }
+    // API 数据检测
+    const newTs = readApiDataTimestamp();
+    if (newTs > 0 && newTs !== lastApiTs) {
       observer.disconnect();
       callback('dom_change');
     }
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
 
   setTimeout(() => {
     observer.disconnect();

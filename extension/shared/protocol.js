@@ -53,3 +53,19 @@ function countQuestions() {
   const matches = text.match(/【[单多判填简]选题】/g);
   return matches ? matches.length : 0;
 }
+
+// ─── API 数据检测 ───
+function hasApiData() {
+  const el = document.getElementById('__cx_api_data');
+  return !!(el && el.textContent);
+}
+
+function readApiDataTimestamp() {
+  const el = document.getElementById('__cx_api_data');
+  if (!el || !el.textContent) return 0;
+  try {
+    return JSON.parse(el.textContent).ts || 0;
+  } catch (_) {
+    return 0;
+  }
+}
