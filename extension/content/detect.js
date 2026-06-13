@@ -1,6 +1,7 @@
 // content/detect.js — 运行在 MAIN world
 // 1. 覆盖 confirm/alert，通过 DOM 属性与 ISOLATED world 通信
-// 2. 拦截所有 fetch/XHR JSON 响应，自动发现题目数据
+// 2. 反反调试：拦截 debugger 循环 (setInterval/setTimeout/Function/eval)
+// 3. 拦截所有 fetch/XHR JSON 响应，自动发现题目数据
 
 // ─── 1. confirm / alert 覆盖 ───
 
@@ -16,7 +17,54 @@ window.alert = function(msg) {
   document.body.setAttribute('data-cx-alert', String(msg || ''));
 };
 
-// ─── 2. 内容嗅探（唯一过滤条件） ───
+// ─── 2. 反反调试 —— 静默干掉 debugger 循环 ───
+
+const ANTI_DEBUG_PATTERNS = /debugger\s*;?/;
+
+// Hook setInterval — 过滤包含 debugger 的回调
+const _setInterval = window.setInterval;
+window.setInterval = function(fn, delay) {
+  if (typeof fn === 'string' && ANTI_DEBUG_PATTERNS.test(fn)) return 0;
+  if (typeof fn === 'function' && ANTI_DEBUG_PATTERNS.test(fn.toString())) return 0;
+  return _setInterval.apply(this, arguments);
+};
+
+// Hook setTimeout — 同上
+const _setTimeout = window.setTimeout;
+window.setTimeout = function(fn, delay) {
+  if (typeof fn === 'string' && ANTI_DEBUG_PATTERNS.test(fn)) return 0;
+  if (typeof fn === 'function' && ANTI_DEBUG_PATTERNS.test(fn.toString())) return 0;
+  return _setTimeout.apply(this, arguments);
+};
+
+// Hook Function 构造器 — 阻止动态创建 debugger 函数
+const _Function = window.Function;
+window.Function = function() {
+  const len = arguments.length;
+  if (len > 0) {
+    const last = arguments[len - 1];
+    if (typeof last === 'string' && ANTI_DEBUG_PATTERNS.test(last)) {
+      arguments[len - 1] = last.replace(ANTI_DEBUG_PATTERNS, '');
+    }
+  }
+  return _Function.apply(this, arguments);
+};
+window.Function.prototype = _Function.prototype;
+
+// Hook eval — 过滤 debugger 字符串
+const _eval = window.eval;
+window.eval = function(code) {
+  if (typeof code === 'string' && ANTI_DEBUG_PATTERNS.test(code)) {
+    code = code.replace(ANTI_DEBUG_PATTERNS, '');
+  }
+  return _eval.call(this, code);
+};
+
+// 阻止 console.clear（反调试常用）
+const _consoleClear = console.clear;
+console.clear = function() {};
+
+// ─── 3. 内容嗅探 ───
 
 const QUESTION_KEYS = [
   'type', 'Type', 'qType', 'q_type', 'questionType', 'question_type',
