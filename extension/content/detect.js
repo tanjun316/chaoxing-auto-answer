@@ -1,6 +1,6 @@
 // content/detect.js — 运行在 MAIN world
 // 1. 覆盖 confirm/alert，通过 DOM 属性与 ISOLATED world 通信
-// 2. 拦截 fetch/XHR 响应，捕获学习通题目 API 数据
+// 2. 拦截所有 fetch/XHR JSON 响应，自动发现题目数据
 
 // ─── 1. confirm / alert 覆盖 ───
 
@@ -16,39 +16,7 @@ window.alert = function(msg) {
   document.body.setAttribute('data-cx-alert', String(msg || ''));
 };
 
-// ─── 2. URL 过滤 ───
-
-const QUESTION_URL_PATTERNS = [
-  'test/student/questions',
-  'test/reVersionStudyStatus',
-  'test/readPaper',
-  'test/checkSecurity',
-  'mooc2-ans',
-  'knowledge/cards',
-  'exam/',
-  'paper/',
-  'question/',
-  'quiz/',
-  'answer/',
-  'ans/',
-  'getQuestion',
-  'getTest',
-  'loadQuestion',
-  'getPaper',
-  'taskPoint',
-  'studyLog',
-  'course/api',
-  'api/test',
-  'api/exam',
-];
-
-function matchesQuestionUrl(url) {
-  if (!url) return false;
-  const lower = url.toLowerCase();
-  return QUESTION_URL_PATTERNS.some(p => lower.includes(p.toLowerCase()));
-}
-
-// ─── 3. 内容嗅探 ───
+// ─── 2. 内容嗅探（唯一过滤条件） ───
 
 const QUESTION_KEYS = [
   'type', 'Type', 'qType', 'q_type', 'questionType', 'question_type',
@@ -57,6 +25,8 @@ const QUESTION_KEYS = [
   'index', 'Index', 'num', 'questionNo', 'id',
   'name', 'description',
 ];
+
+const MAX_RESPONSE_SIZE = 512 * 1024; // 跳过超过 512KB 的响应
 
 function looksLikeQuestions(data) {
   const list = findAnyArray(data);
@@ -89,7 +59,7 @@ function findAnyArray(obj) {
     }
   }
 
-  // 兜底: 遍历所有键找对象数组
+  // 兜底: 遍历所有根键找对象数组
   for (const key of Object.keys(obj)) {
     const val = obj[key];
     if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
@@ -100,21 +70,20 @@ function findAnyArray(obj) {
   return null;
 }
 
-// ─── 4. DOM 桥写入 ───
+// ─── 3. DOM 桥写入 ───
 
 let _apiDataSeq = 0;
 
-function writeApiDataToDom(data) {
+function writeApiDataToDom(data, url) {
   if (!data || typeof data !== 'object') return;
 
   if (!document.body) {
-    // body 尚未就绪，排队等待
     if (!window.__cx_pending_data) window.__cx_pending_data = [];
-    window.__cx_pending_data.push(data);
+    window.__cx_pending_data.push({ data, url });
     if (!window.__cx_dom_hooked) {
       window.__cx_dom_hooked = true;
       document.addEventListener('DOMContentLoaded', () => {
-        (window.__cx_pending_data || []).forEach(writeApiDataToDom);
+        (window.__cx_pending_data || []).forEach(d => writeApiDataToDom(d.data, d.url));
         window.__cx_pending_data = [];
       });
     }
@@ -135,39 +104,50 @@ function writeApiDataToDom(data) {
     seq: _apiDataSeq,
     data: data,
     ts: Date.now(),
+    url: url || '',
   };
   el.textContent = JSON.stringify(store);
 }
 
-// ─── 5. fetch 拦截 ───
+// 记录最近捕获的 URL（调试用，可在 Console 查看）
+window.__cx_captured_urls = [];
+
+function tryIntercept(text, url) {
+  // 快速检查: 必须以 { 或 [ 开头 (JSON)
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return;
+  if (text.length > MAX_RESPONSE_SIZE) return;
+
+  try {
+    const data = JSON.parse(text);
+    if (looksLikeQuestions(data)) {
+      writeApiDataToDom(data, url);
+      window.__cx_captured_urls.push({ url, ts: Date.now(), count: findAnyArray(data)?.length || 0 });
+    }
+  } catch (_) { /* 非 JSON, 忽略 */ }
+}
+
+// ─── 4. fetch 拦截（全部响应） ───
 
 const _fetch = window.fetch;
 
 window.fetch = function(url, init) {
   const urlStr = typeof url === 'string' ? url : (url ? (url.url || url.toString()) : '');
 
-  if (!matchesQuestionUrl(urlStr)) {
-    return _fetch.call(this, url, init);
-  }
-
   return _fetch.call(this, url, init).then(async (response) => {
     if (!response || !response.clone) return response;
     try {
       const clone = response.clone();
       const text = await clone.text();
-      const data = JSON.parse(text);
-      if (looksLikeQuestions(data)) {
-        writeApiDataToDom(data);
-      }
-    } catch (_) { /* 非 JSON 或非题目数据, 忽略 */ }
+      tryIntercept(text, urlStr);
+    } catch (_) { /* clone 失败, 忽略 */ }
     return response;
   }).catch(err => {
-    // 网络错误等, 不拦截
     throw err;
   });
 };
 
-// ─── 6. XMLHttpRequest 拦截 ───
+// ─── 5. XMLHttpRequest 拦截（全部响应） ───
 
 const XHR = XMLHttpRequest;
 const _open = XHR.prototype.open;
@@ -175,25 +155,21 @@ const _send = XHR.prototype.send;
 
 XHR.prototype.open = function(method, url) {
   this.__cx_url = (typeof url === 'string') ? url : '';
-  // 调用原始 open (支持可变参数)
   return _open.apply(this, arguments);
 };
 
 XHR.prototype.send = function() {
   const url = this.__cx_url || '';
 
-  if (matchesQuestionUrl(url)) {
-    this.addEventListener('readystatechange', function() {
-      if (this.readyState === 4 && this.status === 200) {
-        try {
-          const data = JSON.parse(this.responseText);
-          if (looksLikeQuestions(data)) {
-            writeApiDataToDom(data);
-          }
-        } catch (_) { /* 忽略 */ }
-      }
-    });
-  }
+  this.addEventListener('readystatechange', function() {
+    if (this.readyState === 4 && this.status === 200) {
+      tryIntercept(this.responseText, url);
+    }
+  });
 
   return _send.apply(this, arguments);
 };
+
+// ─── 6. 调试：定期输出捕获统计 ───
+
+console.log('[学习通助手] MAIN world 已注入 — 自动拦截所有 fetch/XHR JSON 响应');
